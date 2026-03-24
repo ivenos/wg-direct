@@ -1,6 +1,6 @@
 # wg-direct
 
-Minimal WireGuard image for site-to-site connections, configured only through Docker Compose environment variables.
+Minimal WireGuard image for site-to-site connections, configured only through environment variables.
 
 ## Why this image
 
@@ -15,14 +15,47 @@ Minimal WireGuard image for site-to-site connections, configured only through Do
 docker pull ghcr.io/ivenos/wg-direct:latest
 ```
 
-## Quick start (Docker Compose)
+## Quick start
 
 ### Server
+
+```sh
+docker run -d \
+  --name wg-server \
+  --network host \
+  --cap-add NET_ADMIN \
+  --cap-add SYS_MODULE \
+  --sysctl net.ipv4.ip_forward=1 \
+  -e WG_ROLE=server \
+  -e WG_SECRET="your-long-shared-secret" \
+  --restart unless-stopped \
+  ghcr.io/ivenos/wg-direct:latest
+```
+
+### Client
+
+```sh
+docker run -d \
+  --name wg-client \
+  --network host \
+  --cap-add NET_ADMIN \
+  --cap-add SYS_MODULE \
+  --sysctl net.ipv4.ip_forward=1 \
+  -e WG_ROLE=client \
+  -e WG_SECRET="your-long-shared-secret" \
+  -e WG_SERVER_ENDPOINT="your-server.example.com:51820" \
+  -e WG_ALLOWED_IPS="10.77.0.1/32,192.168.10.0/24" \
+  --restart unless-stopped \
+  ghcr.io/ivenos/wg-direct:latest
+```
+
+### Docker Compose (server)
 
 ```yaml
 services:
   wg-server:
     image: ghcr.io/ivenos/wg-direct:latest
+    network_mode: host
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
@@ -31,18 +64,16 @@ services:
     environment:
       WG_ROLE: server
       WG_SECRET: "your-long-shared-secret"
-      WG_PORT: "51820" # optional
-    ports:
-      - "51820:51820/udp"
     restart: unless-stopped
 ```
 
-### Client
+### Docker Compose (client)
 
 ```yaml
 services:
   wg-client:
     image: ghcr.io/ivenos/wg-direct:latest
+    network_mode: host
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
@@ -77,15 +108,3 @@ openssl rand -hex 32
 ```
 
 Set the **same value** on both server and client.
-
-## `WG_ALLOWED_IPS` examples
-
-- `10.77.0.1/32` → route only the server tunnel IP.
-- `10.77.0.1/32,192.168.10.0/24` → route tunnel IP + remote LAN.
-- `0.0.0.0/0` → route all IPv4 traffic through the tunnel.
-
-## Start
-
-```sh
-docker compose up -d
-```
