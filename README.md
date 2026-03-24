@@ -25,7 +25,6 @@ docker run -d \
   --network host \
   --cap-add NET_ADMIN \
   --cap-add SYS_MODULE \
-  --sysctl net.ipv4.ip_forward=1 \
   -e WG_ROLE=server \
   -e WG_SECRET="your-long-shared-secret" \
   --restart unless-stopped \
@@ -40,7 +39,6 @@ docker run -d \
   --network host \
   --cap-add NET_ADMIN \
   --cap-add SYS_MODULE \
-  --sysctl net.ipv4.ip_forward=1 \
   -e WG_ROLE=client \
   -e WG_SECRET="your-long-shared-secret" \
   -e WG_SERVER_ENDPOINT="your-server.example.com:51820" \
@@ -59,8 +57,6 @@ services:
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
-    sysctls:
-      - net.ipv4.ip_forward=1
     environment:
       WG_ROLE: server
       WG_SECRET: "your-long-shared-secret"
@@ -77,8 +73,6 @@ services:
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
-    sysctls:
-      - net.ipv4.ip_forward=1
     environment:
       WG_ROLE: client
       WG_SECRET: "your-long-shared-secret"
@@ -86,6 +80,13 @@ services:
       WG_ALLOWED_IPS: "10.77.0.1/32,192.168.10.0/24" # optional
     restart: unless-stopped
 ```
+
+> **Note:** Since the container runs with `network_mode: host`, `sysctls` set in the container have no effect. Enable IP forwarding on the host instead:
+>
+> ```sh
+> echo "net.ipv4.ip_forward=1" | sudo tee /etc/sysctl.d/99-ip-forward.conf
+> sudo sysctl -p /etc/sysctl.d/99-ip-forward.conf
+> ```
 
 ## Variables
 
