@@ -15,18 +15,19 @@ die() {
 }
 
 # Convert hex string to binary and output as base64.
-# Uses printf \xNN escapes (POSIX) — avoids gawk-only strtonum().
+# Writes bytes directly into a pipe to avoid shell variable command-substitution
+# stripping \x0a (newline) bytes — a POSIX sh limitation.
 hex_to_base64() {
   _hex="$1"
   _n=$(( ${#_hex} / 2 ))
   _i=0
-  _out=""
-  while [ $_i -lt $_n ]; do
-    _byte=$(printf '%s' "$_hex" | cut -c$(( _i*2+1 ))-$(( _i*2+2 )))
-    _out="${_out}$(printf "\\x${_byte}")"
-    _i=$(( _i + 1 ))
-  done
-  printf '%s' "$_out" | base64 | tr -d '\n'
+  {
+    while [ $_i -lt $_n ]; do
+      _byte=$(printf '%s' "$_hex" | cut -c$(( _i*2+1 ))-$(( _i*2+2 )))
+      printf "\\x${_byte}"
+      _i=$(( _i + 1 ))
+    done
+  } | base64 | tr -d '\n'
   echo
 }
 
