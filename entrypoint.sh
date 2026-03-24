@@ -14,58 +14,111 @@ die() {
   exit 1
 }
 
-# Derive deterministic Curve25519 private key from secret + role
+# Convert hex string to binary and output as base64.
+# Uses od (POSIX) instead of xxd for portability.
+hex_to_base64() {
+  printf '%s' "$1" | awk '
+  {
+    n = length($0) / 2
+    for (i = 0; i < n; i++) {
+      hex = substr($0, i*2+1, 2)
+      printf "%c", strtonum("0x" hex)
+    }
+  }' | base64
+}
+
+# Derive deterministic Curve25519 private key from secret + role.
+# Uses HMAC-SHA256(key=secret, msg="wg-direct|<role>") as KDF.
+# The 32-byte output is clamped to a valid Curve25519 scalar.
+# Requires: openssl, awk, base64
 derive_key() {
   role="$1"
-  python3 - "$WG_SECRET" "$role" <<'PY'
-import base64, hashlib, sys
-secret, role = sys.argv[1], sys.argv[2]
-seed = hashlib.sha256(f"{secret}|{role}".encode()).digest()
-b = bytearray(seed)
-b[0] &= 248
-b[31] &= 127
-b[31] |= 64
-print(base64.b64encode(bytes(b)).decode())
-PY
+  # HMAC-SHA256: key=WG_SECRET, message="wg-direct|<role>"
+  hex="$(printf '%s' "wg-direct|${role}" \
+    | openssl dgst -sha256 -hmac "$WG_SECRET" -binary \
+    | od -A n -t x1 | tr -d ' \n')"
+
+  # Curve25519 scalar clamping via awk (operates on hex pairs):
+  # byte[0]  &= 0xF8  (clear lowest 3 bits)
+  # byte[31] &= 0x7F  (clear highest bit)
+  # byte[31] |= 0x40  (set second-highest bit)
+  clamped="$(printf '%s' "$hex" | awk '
+  {
+    for (i = 1; i <= 32; i++) {
+      hex2 = substr($0, (i-1)*2+1, 2)
+      val = strtonum("0x" hex2)
+      b[i] = val
+    }
+    b[1]  = and(b[1],  248)   # &= 0xF8
+    b[32] = and(b[32], 127)   # &= 0x7F
+    b[32] = or(b[32],  64)    # |= 0x40
+    for (i = 1; i <= 32; i++) {
+      printf "%02x", b[i]
+    }
+    printf "\n"
+  }')"
+
+  hex_to_base64 "$clamped"
 }
 
-# Derive preshared key from secret (symmetric, role-independent)
+# Derive preshared key from secret (symmetric, role-independent).
+# Uses HMAC-SHA256(key=secret, msg="wg-direct|psk").
 derive_psk() {
-  python3 - "$WG_SECRET" <<'PY'
-import base64, hashlib, sys
-seed = hashlib.sha256(f"{sys.argv[1]}|psk".encode()).digest()
-print(base64.b64encode(seed).decode())
-PY
+  printf '%s' "wg-direct|psk" \
+    | openssl dgst -sha256 -hmac "$WG_SECRET" -binary \
+    | base64
 }
 
-# Calculate peer address from own WG_ADDRESS
-# For /30: toggle between the two usable host IPs
+# Calculate peer address from own WG_ADDRESS (CIDR notation).
+# For /30 or /31: toggle between the two usable host IPs.
 # For larger subnets: server=.1, client=.2
 calc_peer_address() {
-  my_address="$1" role="$2"
-  python3 - "$my_address" "$role" <<'PY'
-import ipaddress, sys
-iface = ipaddress.ip_interface(sys.argv[1])
-network = iface.network
-role = sys.argv[2]
-hosts = list(network.hosts())
-if network.prefixlen >= 30:
+  my_cidr="$1"
+  role="$2"
+
+  # Split IP and prefix
+  my_ip="${my_cidr%/*}"
+  prefix="${my_cidr#*/}"
+
+  # Convert IP to integer
+  ip_to_int() {
+    echo "$1" | awk -F. '{ print ($1*16777216) + ($2*65536) + ($3*256) + $4 }'
+  }
+
+  # Convert integer to dotted IP
+  int_to_ip() {
+    awk -v n="$1" 'BEGIN {
+      printf "%d.%d.%d.%d\n",
+        int(n/16777216)%256,
+        int(n/65536)%256,
+        int(n/256)%256,
+        n%256
+    }'
+  }
+
+  my_int="$(ip_to_int "$my_ip")"
+  mask=$(( 0xFFFFFFFF << (32 - prefix) & 0xFFFFFFFF ))
+  net_int=$(( my_int & mask ))
+
+  if [ "$prefix" -ge 30 ]; then
     # /30 or /31: toggle between the two host IPs
-    my_ip = iface.ip
-    if my_ip == hosts[0]:
-        print(str(hosts[1]))
-    elif my_ip == hosts[1]:
-        print(str(hosts[0]))
-    else:
-        print(f"ERROR: {my_ip} is not a valid host in {network}", file=sys.stderr)
-        sys.exit(1)
-else:
+    host1=$(( net_int + 1 ))
+    host2=$(( net_int + 2 ))
+    if [ "$my_int" -eq "$host1" ]; then
+      int_to_ip "$host2"
+    elif [ "$my_int" -eq "$host2" ]; then
+      int_to_ip "$host1"
+    else
+      die "calc_peer_address: $my_ip is not a valid host in ${my_cidr}"
+    fi
+  else
     # Larger subnets: server=.1, client=.2
-    if role == "server":
-        print(str(hosts[1]))  # peer is client = .2
-    else:
-        print(str(hosts[0]))  # peer is server = .1
-PY
+    if [ "$role" = "server" ]; then
+      int_to_ip $(( net_int + 2 ))  # peer is client = .2
+    else
+      int_to_ip $(( net_int + 1 ))  # peer is server = .1
+    fi
+  fi
 }
 
 # --- Required variables ---

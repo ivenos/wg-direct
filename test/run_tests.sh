@@ -139,35 +139,44 @@ cleanup_mock_env
 echo ""
 echo "=== Test 5: Same secret -> same keys on server and client ==="
 setup_mock_env
-SERVER_PRIV="$(WG_SECRET=my-long-test-secret-1234 python3 -c "
-import base64,hashlib,os
-secret=os.environ['WG_SECRET']
-seed=hashlib.sha256(f'{secret}|server'.encode()).digest()
-b=bytearray(seed); b[0]&=248; b[31]&=127; b[31]|=64
-print(base64.b64encode(bytes(b)).decode())
-")"
-CLIENT_PRIV="$(WG_SECRET=my-long-test-secret-1234 python3 -c "
-import base64,hashlib,os
-secret=os.environ['WG_SECRET']
-seed=hashlib.sha256(f'{secret}|client'.encode()).digest()
-b=bytearray(seed); b[0]&=248; b[31]&=127; b[31]|=64
-print(base64.b64encode(bytes(b)).decode())
-")"
+# Replicate derive_key logic: HMAC-SHA256(key=secret, msg="wg-direct|<role>") + Curve25519 clamping
+# Uses od (POSIX) for hex conversion, no xxd required
+_hex_to_base64() {
+  printf '%s' "$1" | awk '
+  {
+    for (i = 1; i <= 32; i++) {
+      hex2 = substr($0, (i-1)*2+1, 2)
+      printf "%c", strtonum("0x" hex2)
+    }
+  }' | base64
+}
+_hmac_key() {
+  hex="$(printf '%s' "wg-direct|${2}" \
+    | openssl dgst -sha256 -hmac "$1" -binary \
+    | od -A n -t x1 | tr -d ' \n')"
+  clamped="$(printf '%s' "$hex" | awk '
+  {
+    for (i = 1; i <= 32; i++) {
+      hex2 = substr($0, (i-1)*2+1, 2)
+      b[i] = strtonum("0x" hex2)
+    }
+    b[1]  = and(b[1],  248)
+    b[32] = and(b[32], 127)
+    b[32] = or(b[32],  64)
+    for (i = 1; i <= 32; i++) printf "%02x", b[i]
+    printf "\n"
+  }')"
+  _hex_to_base64 "$clamped"
+}
+SERVER_PRIV="$(_hmac_key "my-long-test-secret-1234" "server")"
+CLIENT_PRIV="$(_hmac_key "my-long-test-secret-1234" "client")"
 if [ "$SERVER_PRIV" != "$CLIENT_PRIV" ]; then
   ok "Server and client private keys are different"
 else
   fail "Server and client private keys are IDENTICAL"
 fi
-PSK1="$(WG_SECRET=my-long-test-secret-1234 python3 -c "
-import base64,hashlib,os
-seed=hashlib.sha256(f\"{os.environ['WG_SECRET']}|psk\".encode()).digest()
-print(base64.b64encode(seed).decode())
-")"
-PSK2="$(WG_SECRET=my-long-test-secret-1234 python3 -c "
-import base64,hashlib,os
-seed=hashlib.sha256(f\"{os.environ['WG_SECRET']}|psk\".encode()).digest()
-print(base64.b64encode(seed).decode())
-")"
+PSK1="$(printf '%s' "wg-direct|psk" | openssl dgst -sha256 -hmac "my-long-test-secret-1234" -binary | base64)"
+PSK2="$(printf '%s' "wg-direct|psk" | openssl dgst -sha256 -hmac "my-long-test-secret-1234" -binary | base64)"
 if [ "$PSK1" = "$PSK2" ]; then
   ok "PSK is identical on both sides"
 else

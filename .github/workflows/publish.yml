@@ -10,8 +10,17 @@ env:
   IMAGE: ghcr.io/ivenos/wg-direct
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: sh test/run_tests.sh
+
   build-push:
     runs-on: ubuntu-latest
+    needs: test
     permissions:
       contents: read
       packages: write

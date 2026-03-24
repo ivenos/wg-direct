@@ -8,7 +8,7 @@ RUN apk add --no-cache \
     wireguard-tools \
     iptables \
     iproute2 \
-    python3
+    openssl
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

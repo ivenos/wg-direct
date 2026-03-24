@@ -6,7 +6,7 @@ Minimal WireGuard image for site-to-site connections, configured only through Do
 
 - No manual private/public key generation or exchange.
 - Small set of required variables.
-- Deterministic key derivation from one shared secret.
+- Deterministic key derivation from one shared secret using **HMAC-SHA256**.
 - Reproducible setup across environments.
 
 ## Pull image
@@ -67,6 +67,16 @@ services:
 | `WG_ALLOWED_IPS` | Routes sent to peer (mainly client-side) | client: `10.77.0.1/32`, server: peer tunnel IP |
 | `WG_ADDRESS` | Local tunnel address | server: `10.77.0.1/30`, client: `10.77.0.2/30` |
 | `WG_KEEPALIVE` | Persistent keepalive (client) | `25` |
+
+## Generating a secure `WG_SECRET`
+
+Use a cryptographically random 256-bit value. Only alphanumeric characters – no escaping needed in shell or YAML:
+
+```sh
+openssl rand -hex 32
+```
+
+Set the **same value** on both server and client.
 
 ## `WG_ALLOWED_IPS` examples
 
