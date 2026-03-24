@@ -1,4 +1,4 @@
-FROM alpine:3.20
+FROM alpine:3.23
 
 LABEL org.opencontainers.image.source="https://github.com/ivenos/wg-direct" \
       org.opencontainers.image.description="Minimal WireGuard image for site-to-site tunnels" \
