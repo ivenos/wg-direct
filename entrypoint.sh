@@ -45,8 +45,8 @@ derive_key() {
   # byte[0]  &= 0xF8  (clear lowest 3 bits)
   # byte[31] &= 0x7F  (clear highest bit)
   # byte[31] |= 0x40  (set second-highest bit)
-  _b1=$(( 16#$(printf '%s' "$hex" | cut -c1-2) & 248 ))
-  _b32=$(( 16#$(printf '%s' "$hex" | cut -c63-64) & 127 | 64 ))
+  _b1=$(( $(printf '%d' "0x$(printf '%s' "$hex" | cut -c1-2)") & 248 ))
+  _b32=$(( $(printf '%d' "0x$(printf '%s' "$hex" | cut -c63-64)") & 127 | 64 ))
 
   clamped=""
   _i=0
