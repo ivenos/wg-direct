@@ -15,22 +15,25 @@ die() {
 }
 
 # Convert hex string to binary and output as base64.
-# Uses od (POSIX) instead of xxd for portability.
+# Uses printf \xNN escapes (POSIX) — avoids gawk-only strtonum().
 hex_to_base64() {
-  printf '%s' "$1" | awk '
-  {
-    n = length($0) / 2
-    for (i = 0; i < n; i++) {
-      hex = substr($0, i*2+1, 2)
-      printf "%c", strtonum("0x" hex)
-    }
-  }' | base64
+  _hex="$1"
+  _n=$(( ${#_hex} / 2 ))
+  _i=0
+  _out=""
+  while [ $_i -lt $_n ]; do
+    _byte=$(printf '%s' "$_hex" | cut -c$(( _i*2+1 ))-$(( _i*2+2 )))
+    _out="${_out}$(printf "\\x${_byte}")"
+    _i=$(( _i + 1 ))
+  done
+  printf '%s' "$_out" | base64 | tr -d '\n'
+  echo
 }
 
 # Derive deterministic Curve25519 private key from secret + role.
 # Uses HMAC-SHA256(key=secret, msg="wg-direct|<role>") as KDF.
 # The 32-byte output is clamped to a valid Curve25519 scalar.
-# Requires: openssl, awk, base64
+# Requires: openssl, od, cut, base64 — no gawk needed.
 derive_key() {
   role="$1"
   # HMAC-SHA256: key=WG_SECRET, message="wg-direct|<role>"
@@ -38,25 +41,26 @@ derive_key() {
     | openssl dgst -sha256 -hmac "$WG_SECRET" -binary \
     | od -A n -t x1 | tr -d ' \n')"
 
-  # Curve25519 scalar clamping via awk (operates on hex pairs):
+  # Curve25519 scalar clamping via POSIX shell arithmetic:
   # byte[0]  &= 0xF8  (clear lowest 3 bits)
   # byte[31] &= 0x7F  (clear highest bit)
   # byte[31] |= 0x40  (set second-highest bit)
-  clamped="$(printf '%s' "$hex" | awk '
-  {
-    for (i = 1; i <= 32; i++) {
-      hex2 = substr($0, (i-1)*2+1, 2)
-      val = strtonum("0x" hex2)
-      b[i] = val
-    }
-    b[1]  = and(b[1],  248)   # &= 0xF8
-    b[32] = and(b[32], 127)   # &= 0x7F
-    b[32] = or(b[32],  64)    # |= 0x40
-    for (i = 1; i <= 32; i++) {
-      printf "%02x", b[i]
-    }
-    printf "\n"
-  }')"
+  _b1=$(( 16#$(printf '%s' "$hex" | cut -c1-2) & 248 ))
+  _b32=$(( 16#$(printf '%s' "$hex" | cut -c63-64) & 127 | 64 ))
+
+  clamped=""
+  _i=0
+  while [ $_i -lt 32 ]; do
+    _byte_hex=$(printf '%s' "$hex" | cut -c$(( _i*2+1 ))-$(( _i*2+2 )))
+    if [ $_i -eq 0 ]; then
+      clamped="${clamped}$(printf '%02x' $_b1)"
+    elif [ $_i -eq 31 ]; then
+      clamped="${clamped}$(printf '%02x' $_b32)"
+    else
+      clamped="${clamped}${_byte_hex}"
+    fi
+    _i=$(( _i + 1 ))
+  done
 
   hex_to_base64 "$clamped"
 }
